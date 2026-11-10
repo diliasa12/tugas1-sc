@@ -13,17 +13,49 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # tidak ada ports: hanya bisa dijangkau dari network compose
 
-  api:
+  # migrasi dijalankan sekali saja, supaya 3 replica tidak berebut migrasi
+  migrate:
     build: .
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
+    command: ["npm", "run", "migrate:up"]
     environment:
-      PORT: 3000
       DATABASE_URL: postgres://notes:notes@db:5432/notes
     depends_on:
       db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    command: ["npm", "start"]
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://notes:notes@db:5432/notes
+    deploy:
+      replicas: 3
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/notes || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # tidak ada ports dan tidak ada container_name (3 replica butuh nama bebas)
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "8081:80" # satu-satunya port yang terbuka ke host
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
         condition: service_healthy
 
 volumes:
